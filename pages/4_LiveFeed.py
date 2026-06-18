@@ -1,3 +1,9 @@
+import sys
+import os
+# ✅ FIX: Add project root to path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+
 import streamlit as st
 import random
 import time

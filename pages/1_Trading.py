@@ -1,9 +1,19 @@
+import sys
+import os
+
+
+# ✅ FIX: Add project root to path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+
 import streamlit as st
 import time
 from core.engine import init_engine, create_trade, update_trade
 from core.websocket import get_live_price
 from services.dhan import place_order
 from utils.ui import pnl_bar
+
+
 
 init_engine()
 

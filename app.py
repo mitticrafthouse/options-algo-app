@@ -365,4 +365,3 @@ if st.session_state["active_trade"]:
     Target: ₹{trade['target']}  
     Status: {trade['status']}
     """)
-``

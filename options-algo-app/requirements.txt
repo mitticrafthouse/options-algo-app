@@ -1,0 +1,7 @@
+streamlit>=1.36
+pandas>=2.2
+numpy>=2.0
+requests>=2.32
+websocket-client>=1.8
+dhanhq
+plotly>=5.22

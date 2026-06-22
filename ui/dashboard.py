@@ -3,8 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 
 import pandas as pd
-import plotly.graph_objects as go
 import streamlit as st
+
+try:
+    import plotly.graph_objects as go
+    PLOTLY_AVAILABLE = True
+except ImportError:
+    go = None
+    PLOTLY_AVAILABLE = False
 
 from core.backtest import run_backtest, backtest_summary
 from core.signals import generate_signal, classify_signal_for_mode
@@ -222,8 +228,16 @@ LOT_SIZE = {LOT_SIZES[index]}''',
             st.dataframe(trades, use_container_width=True, hide_index=True)
 
             if not trades.empty:
-                fig = _make_trade_chart(candles, trades)
-                st.plotly_chart(fig, use_container_width=True)
+                if PLOTLY_AVAILABLE:
+                    try:
+                        fig = _make_trade_chart(candles, trades)
+                        st.plotly_chart(fig, use_container_width=True)
+                    except Exception as e:
+                        st.warning(f"Chart could not be rendered: {e}")
+                        st.dataframe(trades, use_container_width=True, hide_index=True)
+                else:
+                    st.warning("Plotly is not installed in this environment. Showing table only.")
+                    st.dataframe(trades, use_container_width=True, hide_index=True)
 
                 output_dir = Path("output")
                 output_dir.mkdir(exist_ok=True)

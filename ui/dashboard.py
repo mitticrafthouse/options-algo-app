@@ -13,7 +13,6 @@ except ImportError:
     PLOTLY_AVAILABLE = False
 
 from core.backtest import run_backtest, backtest_summary
-from core.signals import generate_signal, classify_signal_for_mode
 from core.indicators import ema, vwap
 from core.config import LOT_SIZES
 
@@ -42,7 +41,6 @@ def sample_candles():
 def _make_trade_chart(candles: pd.DataFrame, trades: pd.DataFrame):
     candles = candles.copy()
     candles["timestamp"] = pd.to_datetime(candles["timestamp"])
-
     candles["ema9"] = ema(candles["close"], 9)
     candles["ema21"] = ema(candles["close"], 21)
     candles["vwap"] = vwap(candles)
@@ -133,6 +131,8 @@ def _make_trade_chart(candles: pd.DataFrame, trades: pd.DataFrame):
 
 
 def render_dashboard(mode, index, opt_type, strike, entry_premium, target_pts, sl_pts, lots):
+    from core.signals import generate_signal, classify_signal_for_mode
+
     st.title("Options Scalper Dashboard")
     st.caption("Live signal engine with AUTO / MANUAL / BACKTEST support")
 

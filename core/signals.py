@@ -1,73 +1,139 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, asdict
+from typing import Optional, Dict, Any
+
 import pandas as pd
 
-
-def normalize_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
-    required = ["timestamp", "open", "high", "low", "close", "volume"]
-    missing = [c for c in required if c not in df.columns]
-    if missing:
-        raise ValueError(f"Missing columns: {missing}")
-
-    out = df.copy()
-    out["timestamp"] = pd.to_datetime(out["timestamp"])
-    out = out.sort_values("timestamp").reset_index(drop=True)
-
-    for col in ["open", "high", "low", "close", "volume"]:
-        out[col] = pd.to_numeric(out[col], errors="coerce")
-
-    out = out.dropna(subset=["open", "high", "low", "close", "volume"])
-    return out
+from core.indicators import add_indicators
 
 
-def ema(series: pd.Series, span: int) -> pd.Series:
-    return series.ewm(span=span, adjust=False).mean()
+@dataclass
+class SignalResult:
+    signal: str
+    side: str
+    action: str
+    reason: str
+    entry_price: Optional[float] = None
+    target_price: Optional[float] = None
+    stop_loss_price: Optional[float] = None
+    confidence: int = 0
+    trend: str = "NEUTRAL"
+    timestamp: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
 
 
-def sma(series: pd.Series, window: int) -> pd.Series:
-    return series.rolling(window=window, min_periods=window).mean()
+def _last_two(df: pd.DataFrame):
+    if len(df) < 2:
+        return None, None
+    return df.iloc[-2], df.iloc[-1]
 
 
-def vwap(df: pd.DataFrame) -> pd.Series:
-    tp = (df["high"] + df["low"] + df["close"]) / 3.0
-    pv = tp * df["volume"]
-    return pv.cumsum() / df["volume"].cumsum()
+def _volume_confirmation(row: pd.Series, lookback: pd.DataFrame) -> bool:
+    if "volume" not in lookback.columns:
+        return False
+    avg_vol = lookback["volume"].tail(20).mean()
+    if pd.isna(avg_vol) or avg_vol <= 0:
+        return False
+    return float(row["volume"]) >= float(avg_vol)
 
 
-def candle_body(df: pd.DataFrame) -> pd.Series:
-    return df["close"] - df["open"]
-
-
-def candle_range(df: pd.DataFrame) -> pd.Series:
-    return df["high"] - df["low"]
-
-
-def average_true_range(df: pd.DataFrame, period: int = 14) -> pd.Series:
-    prev_close = df["close"].shift(1)
-    tr = pd.concat(
-        [
-            (df["high"] - df["low"]).abs(),
-            (df["high"] - prev_close).abs(),
-            (df["low"] - prev_close).abs(),
-        ],
-        axis=1,
-    ).max(axis=1)
-    return tr.rolling(window=period, min_periods=period).mean()
-
-
-def add_indicators(
+def generate_signal(
     df: pd.DataFrame,
     ema_fast: int = 9,
     ema_slow: int = 21,
-    atr_period: int = 14,
-) -> pd.DataFrame:
-    out = normalize_ohlcv(df)
-    out["ema_fast"] = ema(out["close"], ema_fast)
-    out["ema_slow"] = ema(out["close"], ema_slow)
-    out["vwap"] = vwap(out)
-    out["atr"] = average_true_range(out, atr_period)
-    out["body"] = candle_body(out)
-    out["range"] = candle_range(out)
-    out["bullish"] = out["close"] > out["open"]
-    out["bearish"] = out["close"] < out["open"]
+    target_points: float = 45.0,
+    sl_points: float = 12.0,
+    use_volume_filter: bool = True,
+) -> Dict[str, Any]:
+    data = add_indicators(df, ema_fast=ema_fast, ema_slow=ema_slow)
+    prev, last = _last_two(data)
+
+    if prev is None or last is None:
+        return SignalResult(
+            signal="WAIT",
+            side="NONE",
+            action="NONE",
+            reason="Not enough candles",
+        ).to_dict()
+
+    bullish_cross = (
+        prev["ema_fast"] <= prev["ema_slow"]
+        and last["ema_fast"] > last["ema_slow"]
+        and last["close"] > last["vwap"]
+    )
+
+    bearish_cross = (
+        prev["ema_fast"] >= prev["ema_slow"]
+        and last["ema_fast"] < last["ema_slow"]
+        and last["close"] < last["vwap"]
+    )
+
+    vol_ok = True
+    if use_volume_filter:
+        vol_ok = _volume_confirmation(last, data)
+
+    trend = "BULLISH" if last["close"] > last["vwap"] else "BEARISH" if last["close"] < last["vwap"] else "NEUTRAL"
+
+    if bullish_cross and vol_ok:
+        entry = float(last["close"])
+        return SignalResult(
+            signal="BUY_CE",
+            side="BUY",
+            action="BUY_CE",
+            reason="EMA fast crossed above EMA slow with price above VWAP and volume confirmation",
+            entry_price=entry,
+            target_price=entry + float(target_points),
+            stop_loss_price=entry - float(sl_points),
+            confidence=85,
+            trend=trend,
+            timestamp=str(last["timestamp"]),
+        ).to_dict()
+
+    if bearish_cross and vol_ok:
+        entry = float(last["close"])
+        return SignalResult(
+            signal="BUY_PE",
+            side="BUY",
+            action="BUY_PE",
+            reason="EMA fast crossed below EMA slow with price below VWAP and volume confirmation",
+            entry_price=entry,
+            target_price=entry + float(target_points),
+            stop_loss_price=entry - float(sl_points),
+            confidence=85,
+            trend=trend,
+            timestamp=str(last["timestamp"]),
+        ).to_dict()
+
+    reason = "VWAP/EMA condition not confirmed"
+    if bullish_cross and not vol_ok:
+        reason = "Bullish crossover found, but volume confirmation failed"
+    elif bearish_cross and not vol_ok:
+        reason = "Bearish crossover found, but volume confirmation failed"
+
+    return SignalResult(
+        signal="WAIT",
+        side="NONE",
+        action="NONE",
+        reason=reason,
+        confidence=40 if (bullish_cross or bearish_cross) else 20,
+        trend=trend,
+        timestamp=str(last["timestamp"]),
+    ).to_dict()
+
+
+def classify_signal_for_mode(signal: Dict[str, Any], mode: str) -> Dict[str, Any]:
+    out = dict(signal)
+    mode = (mode or "").upper()
+
+    if mode == "AUTO" and signal.get("signal") in ["BUY_CE", "BUY_PE"]:
+        out["execution"] = "PLACE_ORDER"
+    elif mode == "MANUAL" and signal.get("signal") in ["BUY_CE", "BUY_PE"]:
+        out["execution"] = "SHOW_ONLY"
+    else:
+        out["execution"] = "NO_ACTION"
+
+    out["mode"] = mode
     return out

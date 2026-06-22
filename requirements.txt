@@ -4,4 +4,4 @@ numpy>=2.0
 requests>=2.32
 websocket-client>=1.8
 dhanhq
-plotly
+plotly>=5.22

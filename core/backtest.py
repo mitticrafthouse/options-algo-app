@@ -5,7 +5,6 @@ from typing import Dict, Any, List, Optional
 
 import pandas as pd
 
-from core.signals import generate_signal
 from core.indicators import add_indicators
 
 
@@ -89,6 +88,8 @@ def run_backtest(
 ) -> pd.DataFrame:
     if df is None or df.empty:
         return pd.DataFrame()
+
+    from core.signals import generate_signal
 
     data = add_indicators(df, ema_fast=ema_fast, ema_slow=ema_slow).reset_index(drop=True)
     results: List[TradeResult] = []
